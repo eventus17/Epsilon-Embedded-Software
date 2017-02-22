@@ -52,11 +52,12 @@ osPoolId canPool;
 osMessageQDef(canQueue, 64, CanMsg);
 osMessageQId canQueue;
 
-osThreadId defaultTaskHandle;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
 static osThreadId readCan1TaskHandle;
+static osThreadId readCan2TaskHandle;
+static osThreadId handleDriverTaskHandle;
 
 /* USER CODE END PV */
 
@@ -66,9 +67,9 @@ void Error_Handler(void);
 static void MX_GPIO_Init(void);
 static void MX_CAN2_Init(void);
 static void MX_CAN1_Init(void);
-void StartDefaultTask(void const* argument);
 
 void readCan1Task(void const* arg);
+void readCan2Task(void const* arg);
 
 /* USER CODE BEGIN PFP */
 static void MX_CAN1_UserInit(void);
@@ -154,8 +155,11 @@ int main(void)
     osThreadDef(readFromCan1Task, readCan1Task, osPriorityHigh, 1, 2*configMINIMAL_STACK_SIZE);
     readCan1TaskHandle = osThreadCreate(osThread(readFromCan1Task), NULL);
 
-    osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 1, configMINIMAL_STACK_SIZE);
-    defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
+    osThreadDef(readFromCan2Task, readCan2Task, osPriorityHigh, 1, 2*configMINIMAL_STACK_SIZE);
+    readCan2TaskHandle = osThreadCreate(osThread(readFromCan2Task), NULL); // TODO maybe more generic version to minimize code redundancy
+
+    osThreadDef(driverMsgTask, handleDriverMsgTask, osPriorityNormal, 1, configMINIMAL_STACK_SIZE);
+    handleDriverTaskHandle = osThreadCreate(osThread(driverMsgTask), NULL);
 
     /* USER CODE BEGIN RTOS_THREADS */
     /* add threads, ... */
@@ -437,11 +441,42 @@ void readCan1Task(void const* arg)
 				// Zero CAN Message
 				memset(msg->Data, 0, 8);
 
+				msg->StdId = hcan1.pTxMsg->StdId;
+				msg->DLC = hcan1.pTxMsg->DLC;
+				memcpy(msg->Data, hcan1.pTxMsg->Data, sizeof(uint8_t) * msg->DLC);
+
+				// TODO user feedback: HAL_GPIO_TogglePin(LED_RED_GPIO_Port, LED_RED_Pin);
+
+				osMessagePut(canQueue, (uint32_t)msg, osWaitForever); // TODO maybe use multiple queues for better performance
+
+			}
+			else
+			{
+				/* Reception Error */
+				Error_Handler();
+			}
+
+	    }
+}
+
+void readCan2Task(void const* arg)
+{
+	for (;;)
+	    {
+
+			if (HAL_CAN_Receive_IT(&hcan2, CAN_FIFO0) == HAL_OK) // TODO is that sufficient or do I have to add a callback or HAL_CAN_IRQHandler()?
+			{
+				CanMsg* msg = (CanMsg*)osPoolAlloc(canPool); // has to be freed by other tasks (by calling osPoolFree)
+				// Zero CAN Message
+				memset(msg->Data, 0, 8);
+
 				msg->StdId = hcan2.pTxMsg->StdId;
 				msg->DLC = hcan2.pTxMsg->DLC;
 				memcpy(msg->Data, hcan2.pTxMsg->Data, sizeof(uint8_t) * msg->DLC);
 
 				// TODO user feedback: HAL_GPIO_TogglePin(LED_RED_GPIO_Port, LED_RED_Pin);
+
+				osMessagePut(canQueue, (uint32_t)msg, osWaitForever); // TODO maybe use multiple queues for better performance
 
 			}
 			else
