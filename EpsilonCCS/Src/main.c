@@ -416,20 +416,6 @@ static void MX_CAN2_UserInit(void)
 
 /* USER CODE END 4 */
 
-/* StartDefaultTask function */
-void StartDefaultTask(void const* argument)
-{
-
-    /* USER CODE BEGIN 5 */
-    /* Infinite loop */
-    for (;;)
-    {
-        osDelay(1);
-    }
-
-    /* USER CODE END 5 */
-}
-
 void readCan1Task(void const* arg)
 {
 	for (;;)
