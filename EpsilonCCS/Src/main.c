@@ -36,16 +36,27 @@
 
 /* USER CODE BEGIN Includes */
 
+#include "Util.h"
+#include "DriverControlHandler.h"
+
+#include <string.h> // for memcpy (TODO maybe avoid that include)
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
 CAN_HandleTypeDef hcan1;
 CAN_HandleTypeDef hcan2;
 
+osPoolDef(canPool, 64, CanMsg);
+osPoolId canPool;
+
+osMessageQDef(canQueue, 64, CanMsg);
+osMessageQId canQueue;
+
 osThreadId defaultTaskHandle;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
+static osThreadId readCan1TaskHandle;
 
 /* USER CODE END PV */
 
@@ -56,6 +67,8 @@ static void MX_GPIO_Init(void);
 static void MX_CAN2_Init(void);
 static void MX_CAN1_Init(void);
 void StartDefaultTask(void const* argument);
+
+void readCan1Task(void const* arg);
 
 /* USER CODE BEGIN PFP */
 static void MX_CAN1_UserInit(void);
@@ -138,7 +151,10 @@ int main(void)
 
     /* Create the thread(s) */
     /* definition and creation of defaultTask */
-    osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
+    osThreadDef(readFromCan1Task, readCan1Task, osPriorityHigh, 1, 2*configMINIMAL_STACK_SIZE);
+    readCan1TaskHandle = osThreadCreate(osThread(readFromCan1Task), NULL);
+
+    osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 1, configMINIMAL_STACK_SIZE);
     defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
     /* USER CODE BEGIN RTOS_THREADS */
@@ -408,6 +424,33 @@ void StartDefaultTask(void const* argument)
     }
 
     /* USER CODE END 5 */
+}
+
+void readCan1Task(void const* arg)
+{
+	for (;;)
+	    {
+
+			if (HAL_CAN_Receive_IT(&hcan1, CAN_FIFO0) == HAL_OK) // TODO is that sufficient or do I have to add a callback or HAL_CAN_IRQHandler()?
+			{
+				CanMsg* msg = (CanMsg*)osPoolAlloc(canPool); // has to be freed by other tasks (by calling osPoolFree)
+				// Zero CAN Message
+				memset(msg->Data, 0, 8);
+
+				msg->StdId = hcan2.pTxMsg->StdId;
+				msg->DLC = hcan2.pTxMsg->DLC;
+				memcpy(msg->Data, hcan2.pTxMsg->Data, sizeof(uint8_t) * msg->DLC);
+
+				// TODO user feedback: HAL_GPIO_TogglePin(LED_RED_GPIO_Port, LED_RED_Pin);
+
+			}
+			else
+			{
+				/* Reception Error */
+				Error_Handler();
+			}
+
+	    }
 }
 
 /**
